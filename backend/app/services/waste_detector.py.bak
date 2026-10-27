@@ -1,0 +1,1 @@
+Get-Content ".\app\services\waste_detector.py"
