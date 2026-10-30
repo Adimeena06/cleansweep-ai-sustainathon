@@ -4,10 +4,12 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
 )
+from sqlalchemy.sql import func
 
 from app.database import Base
 
@@ -23,6 +25,7 @@ class WasteReport(Base):
 
     citizen_name = Column(String(120), nullable=True)
     citizen_id = Column(String(120), nullable=True)
+    
 
     title = Column(
         String(200),
@@ -68,15 +71,21 @@ class WasteReport(Base):
         onupdate=utc_now,
         nullable=False,
     )
-    
-    
+
+
 class Truck(Base):
     __tablename__ = "trucks"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    truck_id = Column(String(120), unique=True, nullable=False, index=True)
+    truck_id = Column(
+        String(120),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
     name = Column(String(120), nullable=True)
+    driver_phone = Column(String(20), nullable=True)
 
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
@@ -100,3 +109,33 @@ class Truck(Base):
     delay_minutes = Column(Float, nullable=False, default=0)
 
 
+class WasteCompletion(Base):
+    """Stores proof of completed waste-cleaning jobs."""
+
+    __tablename__ = "waste_completions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    report_id = Column(
+        Integer,
+        ForeignKey("waste_reports.id"),
+        nullable=False,
+        index=True,
+    )
+
+    truck_id = Column(
+        String(120),
+        nullable=False,
+        index=True,
+    )
+
+    after_image_url = Column(
+        String(500),
+        nullable=False,
+    )
+
+    completed_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

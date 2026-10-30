@@ -2,10 +2,14 @@
 from pathlib import Path
 from uuid import uuid4
 from io import BytesIO
-
+from app.services.auto_dispatch import auto_assign_report
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 from PIL import Image
+from app.models import Truck
+from app.services.notification_service import (
+    create_assignment_whatsapp_link,
+)
 
 from app.database import get_db
 from app.models import WasteReport
@@ -110,12 +114,35 @@ async def upload_and_detect_waste(
         image_url = f"/uploads/{image_path.name}"
         annotated_image_url = f"/uploads/{annotated_path.name}"
 
+                # Preserve explicitly supplied GPS coordinates.
+        # If they are missing, try to extract them from location.
+        saved_location = location.strip()
+
+        if latitude is None or longitude is None:
+            try:
+                parts = [part.strip() for part in saved_location.split(",")]
+
+                if len(parts) == 2:
+                    parsed_latitude = float(parts[0])
+                    parsed_longitude = float(parts[1])
+
+                    if (
+                        -90 <= parsed_latitude <= 90
+                        and -180 <= parsed_longitude <= 180
+                    ):
+                        if latitude is None:
+                            latitude = parsed_latitude
+                        if longitude is None:
+                            longitude = parsed_longitude
+            except (ValueError, TypeError):
+                pass
+
         report = WasteReport(
             title=f"AI Waste Detection: {waste_type}",
             description=description or (
                 f"AI detected {result['total_detections']} object(s)."
             ),
-            location=location.strip(),
+            location=saved_location,
             latitude=latitude,
             longitude=longitude,
             severity=matching_severity,
@@ -128,10 +155,80 @@ async def upload_and_detect_waste(
             clean_points=0,
         )
 
+                # Save the report first so a dispatch failure cannot lose it.
         db.add(report)
         db.commit()
         db.refresh(report)
 
+        # Automatically assign a suitable truck using the existing engine.
+        dispatch_result = {
+            "assigned": False,
+            "message": "Automatic dispatch has not completed.",
+        }
+
+        try:
+            dispatch_result = auto_assign_report(db, report)
+
+            if dispatch_result.get("assigned"):
+                report.status = "Assigned"
+
+            db.commit()
+            db.refresh(report)
+
+        except Exception as dispatch_error:
+            # Preserve the already-saved report if dispatch fails.
+            db.rollback()
+            print(
+                f"Automatic dispatch failed for report {report.id}: "
+                f"{type(dispatch_error).__name__}: {dispatch_error}"
+            )
+            dispatch_result = {
+                "assigned": False,
+                "message": "Report saved, but automatic dispatch failed.",
+            }
+        # Generate a WhatsApp link for the assigned truck driver.
+        notification_result = {
+            "success": False,
+            "message": "No truck was assigned.",
+            "whatsapp_link": None,
+        }
+
+        if dispatch_result.get("assigned"):
+            try:
+                assigned_truck_id = (
+                    dispatch_result.get("truck_id")
+                    or report.assigned_truck
+                )
+
+                assigned_truck = (
+                    db.query(Truck)
+                    .filter(Truck.truck_id == assigned_truck_id)
+                    .first()
+                )
+
+                if assigned_truck:
+                    notification_result = (
+                        create_assignment_whatsapp_link(
+                            report,
+                            assigned_truck,
+                        )
+                    )
+                else:
+                    notification_result["message"] = (
+                        "The assigned truck could not be found."
+                    )
+
+            except Exception as notification_error:
+                print(
+                    f"WhatsApp link generation failed for report "
+                    f"{report.id}: {notification_error}"
+                )
+
+                notification_result = {
+                    "success": False,
+                    "message": "Failed to generate WhatsApp link.",
+                    "whatsapp_link": None,
+                }
         result["image_url"] = image_url
         result["annotated_image_url"] = annotated_image_url
         result["report"] = {
@@ -144,8 +241,10 @@ async def upload_and_detect_waste(
             "ai_confidence": report.ai_confidence,
             "detection_count": report.detection_count,
             "created_at": report.created_at.isoformat(),
+            
         }
-
+        result["dispatch"] = dispatch_result
+        result["notification"] = notification_result
         return result
 
     except HTTPException:

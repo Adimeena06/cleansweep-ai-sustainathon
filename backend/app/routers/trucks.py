@@ -22,6 +22,7 @@ ALLOWED_STATUSES = {
 class TruckCreate(BaseModel):
     truck_id: str = Field(min_length=1, max_length=120)
     name: str | None = Field(default=None, max_length=120)
+    driver_phone: str | None = Field(default=None, max_length=20)
 
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
@@ -46,6 +47,7 @@ class TruckCreate(BaseModel):
 
 class TruckUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=120)
+    driver_phone: str | None = Field(default=None, max_length=20)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     capacity: float | None = Field(default=None, gt=0)
@@ -60,6 +62,7 @@ def truck_to_dict(truck):
         "id": truck.id,
         "truck_id": truck.truck_id,
         "name": truck.name,
+        "driver_phone": truck.driver_phone,
         "latitude": truck.latitude,
         "longitude": truck.longitude,
         "capacity": truck.capacity,

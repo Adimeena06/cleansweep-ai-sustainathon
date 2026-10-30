@@ -12,3 +12,26 @@ runs/
 datasets/
 data/
 *.pt
+# Local database
+backend/cleansweep.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.backup
+*.before-fix
+*.current-backup
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Frontend
+node_modules/
+dist/
+
+# Local uploads and datasets
+backend/uploads/
+backend/data/

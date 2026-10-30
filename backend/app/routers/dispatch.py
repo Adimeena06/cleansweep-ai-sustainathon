@@ -80,10 +80,14 @@ def get_supported_types(truck):
     if not raw_types:
         return ["mixed"]
 
+    # Support both database strings and Python lists.
+    if isinstance(raw_types, str):
+        raw_types = raw_types.split(",")
+
     return [
         normalize_waste_type(item)
-        for item in raw_types.split(",")
-        if item.strip()
+        for item in raw_types
+        if str(item).strip()
     ]
 
 

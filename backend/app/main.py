@@ -1,6 +1,7 @@
 from app.routers import priority
 
 import os
+from app.routers import driver
 from pathlib import Path
 from app.database import Base, engine
 from app import models
@@ -55,4 +56,5 @@ app.include_router(
 )
 
 app.include_router(priority.router, prefix="/api/priority", tags=["Smart Priority"])
+app.include_router(driver.router)
 

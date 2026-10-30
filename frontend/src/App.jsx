@@ -6,8 +6,11 @@ import {
   Camera, Coins, ClipboardList, Navigation, Check, CircleDot, Image as ImageIcon, CloudRain
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
+import DriverPortal from "./DriverPortal";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 const API = "";
+// Demo configuration: all trucks route notifications to this shared number until individual driver numbers are supplied.
+const DEFAULT_DRIVER_PHONE = "+918468060832";
 const STORAGE_KEY = "cleansweep_demo_reports_v1";
 
 const SEVERITY_POINTS = { Low: 10, Medium: 25, High: 50, Critical: 100 };
@@ -93,6 +96,8 @@ export default function App() {
   const [health, setHealth] = useState("checking");
   const [filter, setFilter] = useState("All");
   const [trucks, setTrucks] = useState([]);
+  const [driverPhoneDrafts, setDriverPhoneDrafts] = useState({});
+  const [savingDriverPhone, setSavingDriverPhone] = useState({});
   const [dispatchRecommendation, setDispatchRecommendation] = useState(null);
   const [dispatchLoading, setDispatchLoading] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState("");
@@ -188,6 +193,7 @@ export default function App() {
         currentLoad: truck.current_load,
         remainingCapacity: truck.remaining_capacity,
         supportedWasteTypes: truck.supported_waste_types || [],
+        driverPhone: truck.driver_phone || DEFAULT_DRIVER_PHONE,
         delayMinutes: truck.delay_minutes || 0,
         status:
           truck.status === "available"
@@ -197,6 +203,14 @@ export default function App() {
               : truck.status
       }))
     );
+    setDriverPhoneDrafts((previous) => {
+      const next = { ...previous };
+      for (const truck of truckData) {
+        const id = truck.truck_id;
+        if (id && next[id] == null) next[id] = truck.driver_phone || DEFAULT_DRIVER_PHONE;
+      }
+      return next;
+    });
 
     setBackendReportsLoaded(true);
     setHealth("online");
@@ -618,6 +632,40 @@ async function assignRecommendedTruck(reportId, truckId) {
     }
   }
 
+  async function saveDriverPhone(truckId) {
+    const rawPhone = String(driverPhoneDrafts[truckId] ?? trucks.find((t) => t.id === truckId)?.driverPhone ?? DEFAULT_DRIVER_PHONE).trim();
+    const normalized = rawPhone.replace(/[\s()-]/g, "");
+    if (!/^\+[1-9]\d{7,14}$/.test(normalized)) {
+      setError(`Enter a valid international phone number for ${truckId}, including country code (for example, +91XXXXXXXXXX).`);
+      return;
+    }
+
+    setSavingDriverPhone((prev) => ({ ...prev, [truckId]: true }));
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`${API}/api/trucks/${encodeURIComponent(truckId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driver_phone: normalized })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string"
+          ? data.detail
+          : "The backend must support the driver_phone field before this can be saved.");
+      }
+      setTrucks((prev) => prev.map((t) => t.id === truckId ? { ...t, driverPhone: normalized } : t));
+      setDriverPhoneDrafts((prev) => ({ ...prev, [truckId]: normalized }));
+      setMessage(`Driver notification number saved for ${truckId}.`);
+      await loadDashboardData();
+    } catch (err) {
+      setError(err.message || `Could not save the number for ${truckId}.`);
+    } finally {
+      setSavingDriverPhone((prev) => ({ ...prev, [truckId]: false }));
+    }
+  }
+
   async function activateRainMode() {
     setWeatherLoading(true);
     setError("");
@@ -653,21 +701,64 @@ async function assignRecommendedTruck(reportId, truckId) {
 
   const visibleReports = reports.filter(r => filter === "All" || r.status === filter);
 
+  
   return <>
-    <style>{styles}</style>
-    <div className={`cs-app ${rainMode ? "cs-rain-mode" : ""}`}>
-      {rainMode && <div className="cs-rain-overlay" aria-hidden="true" />}
-      <header className="cs-header">
-        <button className="cs-brand" onClick={() => switchPortal("citizen")} aria-label="CleanSweep AI home">
-          <span className="cs-logo"><Recycle size={24} /></span>
-          <span><strong>CleanSweep<span className="cs-brand-ai">AI</span></strong><small>SMARTER CITIES. CLEANER TOMORROWS.</small></span>
-        </button>
-        <div className="cs-header-right">
-          <span className={`cs-api ${health}`}><i />{health === "online" ? "AI backend online" : health === "offline" ? "AI backend offline" : "Checking backend"}</span>
-          <button className={`cs-portal-tab ${portal === "citizen" ? "selected" : ""}`} onClick={() => switchPortal("citizen")}><Leaf size={16} /> Citizen Portal</button>
-          <button className={`cs-portal-tab ${portal === "admin" ? "selected" : ""}`} onClick={() => switchPortal("admin")}><ShieldCheck size={16} /> Admin Dashboard</button>
-        </div>
-      </header>
+
+  <style>{styles}</style>
+
+  <div className={`cs-app ${rainMode ? "cs-rain-mode" : ""}`}>
+    {rainMode && <div className="cs-rain-overlay" aria-hidden="true" />}
+
+```
+<header className="cs-header">
+  <button
+    className="cs-brand"
+    onClick={() => switchPortal("citizen")}
+    aria-label="CleanSweep AI home"
+  >
+    <span className="cs-logo"><Recycle size={24} /></span>
+    <span>
+      <strong>
+        CleanSweep<span className="cs-brand-ai">AI</span>
+      </strong>
+      <small>SMARTER CITIES. CLEANER TOMORROWS.</small>
+    </span>
+  </button>
+
+  <div className="cs-header-right">
+    <span className={`cs-api ${health}`}>
+      <i />
+      {health === "online"
+        ? "AI backend online"
+        : health === "offline"
+        ? "AI backend offline"
+        : "Checking backend"}
+    </span>
+
+    <button
+      className={`cs-portal-tab ${portal === "citizen" ? "selected" : ""}`}
+      onClick={() => switchPortal("citizen")}
+    >
+      <Leaf size={16} /> Citizen Portal
+    </button>
+
+    <button
+      className={`cs-portal-tab ${portal === "admin" ? "selected" : ""}`}
+      onClick={() => switchPortal("admin")}
+    >
+      <ShieldCheck size={16} /> Admin Dashboard
+    </button>
+
+    <button
+      className={`cs-portal-tab ${portal === "driver" ? "selected" : ""}`}
+      onClick={() => switchPortal("driver")}
+    >
+      <Truck size={16} /> Driver Portal
+    </button>
+  </div>
+</header>
+```
+
 
       {rainMode && <section className="cs-weather-emergency-banner" role="status">
         <CloudRain size={25} />
@@ -782,7 +873,9 @@ async function assignRecommendedTruck(reportId, truckId) {
           ].map(([emoji, title, desc, cost]) => <article className="cs-reward" key={title}><span>{emoji}</span><h3>{title}</h3><p>{desc}</p><div><strong><Coins size={15} /> {cost} points</strong><button className="cs-btn secondary" disabled={citizenPoints < cost} onClick={() => setMessage(`${title}: redemption is a concept demonstration. No real benefit has been issued.`)}>Redeem demo</button></div></article>)}</div>
           <p className="cs-disclaimer"><AlertCircle size={15} /> These rewards are illustrative only. Actual government benefits or redemptions require an authorised partner and a real programme.</p>
         </main>}
-      </> : <>
+            </> : portal === "driver" ? (
+        <DriverPortal trucks={trucks} />
+      ) : <>
         <nav className="cs-subnav admin-nav">
           <button className={page === "admin" ? "active" : ""} onClick={() => setPage("admin")}>Overview</button>
           <button className={page === "admin-complaints" ? "active" : ""} onClick={() => setPage("admin-complaints")}>Complaints <span>{reports.length}</span></button>
@@ -852,7 +945,7 @@ async function assignRecommendedTruck(reportId, truckId) {
         </main>}
         {page === "admin-trucks" && <main className="cs-main">
           <div className="cs-page-heading"><span className="cs-kicker">FLEET OPERATIONS</span><h1>Truck dispatch & fleet</h1><p>Assign collection tasks and update truck availability for the demonstration.</p></div>
-          <div className="cs-truck-cards">{trucks.map(t => <article className="cs-truck-card" key={t.id}><div className="cs-truck-card-top"><span className="cs-truck-icon big"><Truck size={24} /></span><Badge tone={t.status === "Available" ? "green" : t.status === "Collecting" ? "blue" : "amber"}>{t.status}</Badge></div><h3>{t.id}</h3><p><MapPin size={14} /> {t.area}</p><label className="cs-label">Update truck status</label><select value={t.status} onChange={e => setTrucks(prev => prev.map(x => x.id === t.id ? { ...x, status: e.target.value } : x))}><option>Available</option><option>Assigned</option><option>Collecting</option><option>Returning</option><option>Maintenance</option></select></article>)}</div>
+          <div className="cs-truck-cards">{trucks.map(t => <article className="cs-truck-card" key={t.id}><div className="cs-truck-card-top"><span className="cs-truck-icon big"><Truck size={24} /></span><Badge tone={t.status === "Available" ? "green" : t.status === "Collecting" ? "blue" : "amber"}>{t.status}</Badge></div><h3>{t.id}</h3><p><MapPin size={14} /> {t.area}</p><label className="cs-label" htmlFor={`driver-phone-${t.id}`}>Driver WhatsApp number (shared demo number)</label><input id={`driver-phone-${t.id}`} className="cs-input" type="tel" inputMode="tel" autoComplete="tel" value={driverPhoneDrafts[t.id] ?? t.driverPhone ?? DEFAULT_DRIVER_PHONE} onChange={e => setDriverPhoneDrafts(prev => ({ ...prev, [t.id]: e.target.value }))} placeholder="+918468060832" /><button className="cs-btn primary full" type="button" onClick={() => saveDriverPhone(t.id)} disabled={!!savingDriverPhone[t.id]}>{savingDriverPhone[t.id] ? <LoaderCircle className="cs-spin" size={16} /> : <Check size={16} />}{savingDriverPhone[t.id] ? "Saving number…" : "Save driver number"}</button><small className="cs-muted cs-small">Default: +918468060832. Save requires backend driver_phone support.</small><label className="cs-label">Update truck status</label><select value={t.status} onChange={e => setTrucks(prev => prev.map(x => x.id === t.id ? { ...x, status: e.target.value } : x))}><option>Available</option><option>Assigned</option><option>Collecting</option><option>Returning</option><option>Maintenance</option></select></article>)}</div>
           <section className="cs-card cs-table-card"><div className="cs-section-head inside"><div><span className="cs-kicker">DISPATCH QUEUE</span><h2>Unresolved complaints</h2></div></div><AdminTable reports={reports.filter(r => r.status !== "Resolved" && r.status !== "Rejected")} updateReport={updateReport} assignTruck={assignTruck} trucks={trucks} /></section>
           <p className="cs-disclaimer"><Navigation size={15} /> Truck positions and status are demonstration data, not live GPS tracking.</p>
         </main>}
